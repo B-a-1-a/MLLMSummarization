@@ -4,19 +4,21 @@ import openai
 from datasets import load_dataset
 from tqdm import tqdm
 import evaluate
+import config  # Import config.py for settings
 
-# Use environment variable for OpenAI API key
-openai.api_key = os.getenv('OPENAI_API_KEY')
-print("API Key Loaded:", openai.api_key)  # Confirm API key is loaded
+# Set OpenAI API key from config
+openai.api_key = config.OPENAI_API_KEY
+print("API Key Loaded:", bool(openai.api_key))  # Confirm API key is loaded
 
-# Set configuration settings with fallback defaults
-MODEL_NAME = 'gpt-4'
-MAX_INPUT_TOKENS = 4000
-MAX_SUMMARY_TOKENS = 50  # Reduce token limit for testing
-TEMPERATURE = 0.3  # Lower temperature for more consistent outputs
+# Configuration settings from config.py
+MODEL_NAME = config.MODEL_NAME
+MAX_INPUT_TOKENS = config.MAX_INPUT_TOKENS
+MAX_SUMMARY_TOKENS = config.MAX_SUMMARY_TOKENS
+TEMPERATURE = config.TEMPERATURE
 
 def generate_summary(text):
-    # Truncate text if necessary
+    """Generate summary using OpenAI's API."""
+    # Truncate text to fit token limit
     text_tokens = text.split()
     if len(text_tokens) > MAX_INPUT_TOKENS:
         text = ' '.join(text_tokens[:MAX_INPUT_TOKENS])
@@ -31,39 +33,36 @@ def generate_summary(text):
             max_tokens=MAX_SUMMARY_TOKENS,
             temperature=TEMPERATURE,
         )
-        print("API Response:", response)  # Debug statement
         summary = response['choices'][0]['message']['content'].strip()
         return summary
     except Exception as e:
         print(f"Error during API call: {e}")
         return ""
 
+def load_cache(cache_file):
+    """Load cache from JSON file."""
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r') as f:
+            return json.load(f)
+    return {}
 
+def save_cache(cache_file, cache_data):
+    """Save cache to JSON file."""
+    with open(cache_file, 'w') as f:
+        json.dump(cache_data, f)
 
-def test_generate_summary():
-    # Test the generate_summary function with a sample input
-    test_text = "OpenAI creates cutting-edge AI tools for research and development."
-    print("Test summary:", generate_summary(test_text))
-
-def main():
-    # Test the summary generation function with a sample input
-    test_generate_summary()
-
+def main(sample_size=10):
     # Load dataset
     print("Loading dataset...")
     dataset = load_dataset('cnn_dailymail', '3.0.0')
-    test_dataset = dataset['test'].select(range(10))  # Modify the range as needed
+    test_dataset = dataset['test'].select(range(sample_size))  # Use sample size
 
     articles = test_dataset['article']
     references = test_dataset['highlights']
 
-    # Initialize cache
+    # Load or initialize cache
     cache_file = 'summaries_cache.json'
-    if os.path.exists(cache_file):
-        with open(cache_file, 'r') as f:
-            summaries_cache = json.load(f)
-    else:
-        summaries_cache = {}
+    summaries_cache = load_cache(cache_file)
 
     generated_summaries = []
 
@@ -72,18 +71,10 @@ def main():
         if article in summaries_cache:
             summary = summaries_cache[article]
         else:
-            try:
-                summary = generate_summary(article)
-                summaries_cache[article] = summary
+            summary = generate_summary(article)
+            summaries_cache[article] = summary
+            save_cache(cache_file, summaries_cache)  # Save after each generation
 
-                # Save to cache file
-                with open(cache_file, 'w') as f:
-                    json.dump(summaries_cache, f)
-            except Exception as e:
-                print(f"Error generating summary: {e}")
-                summary = ""
-
-        print(f"Generated summary for article: {summary}")  # Debug statement for each generated summary
         generated_summaries.append(summary)
 
     # Evaluate summaries
@@ -92,13 +83,13 @@ def main():
     results = rouge.compute(predictions=generated_summaries, references=references)
 
     print("\nROUGE Scores:")
-    for key in results:
-        print(f"{key}: {results[key]:.2f}")
+    for key, value in results.items():
+        print(f"{key}: {value:.2f}")
 
-    # Optional: Display summaries
+    # Display summaries
     for i in range(len(generated_summaries)):
         print(f"\nArticle {i+1}:")
-        print(articles[i][:500] + '...')  # Print the first 500 characters
+        print(articles[i][:500] + '...')  # Print first 500 characters
         print("\nGenerated Summary:")
         print(generated_summaries[i])
         print("\nReference Summary:")
@@ -106,4 +97,4 @@ def main():
         print("\n" + "="*80)
 
 if __name__ == "__main__":
-    main()
+    main(sample_size=3)  # Adjust sample size as needed
